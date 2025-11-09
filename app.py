@@ -9,6 +9,7 @@ import re
 import random
 import os
 import threading 
+import json
 
 # --- Configuration ---
 app = Flask(__name__)
@@ -91,34 +92,47 @@ def log_prediction_async(sms_text, result, confidence, threat_level, fraud_type,
         conn.close()
 
 # --- Model Loading ---
-binary_pipeline = None
-subtype_pipeline = None
-vectorizer = None
+main_3class_pipeline = None
+scam_subtype_pipeline = None
+promo_subtype_pipeline = None
 
 try:
-    with open('combined_binary_pipeline.pkl', 'rb') as f:
-        binary_pipeline = pickle.load(f)
-    with open('combined_subtype_pipeline.pkl', 'rb') as f:
-        subtype_pipeline = pickle.load(f) 
+    with open('main_3class_pipeline.pkl', 'rb') as f:
+        main_3class_pipeline = pickle.load(f)
+    print("✅ Main 3-class pipeline loaded successfully!")
     
-    preprocessor = binary_pipeline.named_steps['preprocessor']
-    vectorizer = preprocessor.named_transformers_['text']
-    print("Model pipelines loaded successfully! (MNB + LinearSVC)")
+    # Try to load subtype pipelines if they exist
+    try:
+        with open('scam_subtype_pipeline.pkl', 'rb') as f:
+            scam_subtype_pipeline = pickle.load(f)
+        print("✅ Scam subtype pipeline loaded successfully!")
+    except FileNotFoundError:
+        print("⚠️  Scam subtype pipeline not found")
+    
+    try:
+        with open('promo_subtype_pipeline.pkl', 'rb') as f:
+            promo_subtype_pipeline = pickle.load(f)
+        print("✅ Promo subtype pipeline loaded successfully!")
+    except FileNotFoundError:
+        print("⚠️  Promo subtype pipeline not found")
+        
 except Exception as e:
-    print(f"WARNING: Model files not found. Using dummy model. Error: {e}")
+    print(f"❌ ERROR: Model files not found. Please train the models first. Error: {e}")
 
 # --- Feature Extraction and Rules ---
 RISKY_WORDS = ["click", "offer", "sale", "free", "account", "verify", "password", "urgent", "congratulations", "win", "reward", "loan", "deposit", "limited"]
 
-# UPDATED: Added promo patterns
+# Enhanced fraud patterns for better classification
 FRAUD_PATTERNS = {
-    'financial_scams': {'keywords': ['bank', 'account', 'credit card', 'verify', 'suspend', 'block', 'loan', 'kyc', 'password'], 'threat_level': 'HIGH'},
-    'prize_clickbait_scams': {'keywords': ['won', 'winner', 'prize', 'lottery', 'congratulations', 'claim', 'gift card', 'click here', 'reward'], 'threat_level': 'MEDIUM'},
-    'phishing_urgency_scams': {'keywords': ['update', 'expires', 'urgent', 'immediately', 'act now', 'confirm', 'security', 'alert'], 'threat_level': 'HIGH'},
-    'promotional_offers': {'keywords': ['sale', 'offer', 'discount', 'free', 'limited stock', 'shop now', 'deal', 'promo', 'buy now', 'special offer'], 'threat_level': 'LOW'},
-    'government_impersonation': {'keywords': ['government', 'irs', 'police', 'court', 'legal action', 'arrest', 'warrant', 'aadhaar', 'pan'], 'threat_level': 'CRITICAL'},
-    'relationship_emotional_scams': {'keywords': ['love', 'miss you', 'emergency', 'help me', 'family', 'friend in need'], 'threat_level': 'MEDIUM'},
-    'employment_opportunity_scams': {'keywords': ['job', 'work from home', 'salary', 'interview', 'hiring', 'opportunity', 'earn money'], 'threat_level': 'MEDIUM'},
+    'financial_scams': {'keywords': ['bank', 'account', 'credit card', 'verify', 'suspend', 'block', 'loan', 'kyc', 'password', 'upi', 'transaction'], 'threat_level': 'HIGH'},
+    'prize_clickbait_scams': {'keywords': ['won', 'winner', 'prize', 'lottery', 'congratulations', 'claim', 'gift card', 'click here', 'reward', 'selected', 'lucky'], 'threat_level': 'MEDIUM'},
+    'phishing_urgency_scams': {'keywords': ['update', 'expires', 'urgent', 'immediately', 'act now', 'confirm', 'security', 'alert', 'suspended', 'verify now'], 'threat_level': 'HIGH'},
+    'promotional_offers': {'keywords': ['sale', 'offer', 'discount', 'free', 'limited stock', 'shop now', 'deal', 'promo', 'buy now', 'special offer', 'flash sale'], 'threat_level': 'LOW'},
+    'government_impersonation': {'keywords': ['government', 'irs', 'police', 'court', 'legal action', 'arrest', 'warrant', 'aadhaar', 'pan', 'income tax'], 'threat_level': 'CRITICAL'},
+    'relationship_emotional_scams': {'keywords': ['love', 'miss you', 'emergency', 'help me', 'family', 'friend in need', 'stuck', 'hospital'], 'threat_level': 'MEDIUM'},
+    'employment_opportunity_scams': {'keywords': ['job', 'work from home', 'salary', 'interview', 'hiring', 'opportunity', 'earn money', 'weekly income'], 'threat_level': 'MEDIUM'},
+    'tech_support': {'keywords': ['tech support', 'virus', 'antivirus', 'update software', 'system scan'], 'threat_level': 'HIGH'},
+    'service_update': {'keywords': ['order', 'track', 'delivery', 'shipped', 'appointment', 'bill', 'payment'], 'threat_level': 'LOW'},
 }
 
 def contains_link(text): 
@@ -128,68 +142,116 @@ def find_suspicious_words(text):
     return [w for w in RISKY_WORDS if w in text.lower()]
 
 def detect_language(text):
-    if re.search(r"\b(hai|na|kal|kya|kyc|kyun|yaar)\b", text.lower()): 
+    # Enhanced language detection
+    text_lower = text.lower()
+    
+    # Hindi detection
+    if re.search(r"[\u0900-\u097F]", text):
+        return "Hindi"
+    # Kannada detection
+    elif re.search(r"[\u0C80-\u0CFF]", text):
+        return "Kannada"
+    # Hinglish detection (mix of English and Hindi words)
+    elif re.search(r"\b(accha|theek|hai|nahi|kyun|kya|kal|aaj)\b", text_lower):
         return "Hinglish"
-    elif any(ord(c) > 127 for c in text): 
-        return "Regional"
-    else: 
+    else:
         return "English"
 
 def detect_ai_generated_score(text):
-    patterns = ["congratulations", "urgent", "limited offer", "click here", "act now", "dear user", "verify now"]
-    score = sum(1 for p in patterns if p in text.lower()) / 7.0
+    patterns = ["congratulations", "urgent", "limited offer", "click here", "act now", "dear user", "verify now", "winner", "prize", "claim now"]
+    score = sum(1 for p in patterns if p in text.lower()) / 10.0
     return round(min(score + random.uniform(0.0, 0.2), 0.99), 2)
 
-def simulate_trust_scores(label_main, has_link):
-    sender_trust_score = round(random.uniform(0.3, 0.6), 2)
-    link_reputation_score = round(random.uniform(0.1, 0.5), 2) if has_link else 1.0 
+def simulate_trust_scores(category, has_link):
+    """Enhanced trust score simulation based on category"""
+    if category == 'ham':
+        sender_trust_score = round(random.uniform(0.7, 1.0), 2)
+    elif category == 'promo':
+        sender_trust_score = round(random.uniform(0.4, 0.8), 2)
+    else:  # spam
+        sender_trust_score = round(random.uniform(0.0, 0.4), 2)
+    
+    # Link reputation based on category and presence of link
+    if has_link:
+        if category == 'spam':
+            link_reputation_score = round(random.uniform(0.0, 0.3), 2)
+        elif category == 'promo':
+            link_reputation_score = round(random.uniform(0.6, 0.9), 2)
+        else:  # ham
+            link_reputation_score = round(random.uniform(0.8, 1.0), 2)
+    else:
+        link_reputation_score = 1.0
+    
     return sender_trust_score, link_reputation_score
 
 def preprocess_text(text):
+    """Enhanced text preprocessing for multilingual support"""
     if isinstance(text, str):
+        # Convert to lowercase but preserve multilingual characters
         text = text.lower()
-        text = re.sub(r"[^a-zA-Z0-9\s/.:-]", " ", text) 
+        
+        # Keep essential punctuation and multilingual characters
+        text = re.sub(r"[^a-zA-Z0-9\s/.:\-@\u0900-\u097F\u0C80-\u0CFF]", " ", text)
+        
+        # Remove extra whitespace
         return ' '.join(text.split())
     return ""
 
 def extract_all_features(sms_text):
+    """Extract all features for prediction"""
     has_link = contains_link(sms_text)
-    sender_trust_score, link_reputation_score = simulate_trust_scores(None, has_link)
     ai_generated_score = detect_ai_generated_score(sms_text)
+    language_type = detect_language(sms_text)
+    
+    # Initial trust scores (will be updated after prediction)
+    sender_trust_score, link_reputation_score = simulate_trust_scores(None, has_link)
+    
     data = {
         'message': preprocess_text(sms_text), 
         'contains_link': has_link, 
         'sender_trust_score': sender_trust_score, 
         'link_reputation_score': link_reputation_score, 
         'ai_generated_score': ai_generated_score, 
-        'language_type': detect_language(sms_text), 
+        'language_type': language_type, 
         'suspicious_words_found': find_suspicious_words(sms_text) 
     }
     return pd.DataFrame([data])
 
-def get_explainability_features(df_features, X_vec):
+def get_explainability_features(df_features, prediction):
+    """Enhanced explainability features"""
     explanations = {}
     meta = df_features.iloc[0]
     explanations['top_text_features'] = meta['suspicious_words_found']
     
     if meta['contains_link'] == 1:
         reputation = meta['link_reputation_score']
-        explanations['link_status'] = f"⚠️ Phishing Link (Reputation: {reputation:.2f})" if reputation < 0.3 else f"🟡 Medium Risk Link ({reputation:.2f})"
+        if reputation < 0.3:
+            explanations['link_status'] = f"⚠️ Suspicious Link (Reputation: {reputation:.2f})"
+        elif reputation < 0.7:
+            explanations['link_status'] = f"🟡 Medium Risk Link ({reputation:.2f})"
+        else:
+            explanations['link_status'] = f"🟢 Safe Link ({reputation:.2f})"
     
     if meta['sender_trust_score'] < 0.4: 
         explanations['sender_trust'] = f"🔴 Very Low Sender Trust Score ({meta['sender_trust_score']:.2f})"
+    elif meta['sender_trust_score'] < 0.7:
+        explanations['sender_trust'] = f"🟡 Medium Sender Trust Score ({meta['sender_trust_score']:.2f})"
+    else:
+        explanations['sender_trust'] = f"🟢 High Sender Trust Score ({meta['sender_trust_score']:.2f})"
     
-    if meta['ai_generated_score'] > 0.8: 
-        explanations['ai_template'] = f"🤖 High Likelihood of AI/Template Generation ({meta['ai_generated_score']:.2f})"
+    if meta['ai_generated_score'] > 0.7: 
+        explanations['ai_template'] = f"🤖 Likely AI/Template Generated ({meta['ai_generated_score']:.2f})"
     
-    if meta['language_type'] in ['Hinglish', 'Regional']: 
+    if meta['language_type'] in ['Hinglish', 'Hindi', 'Kannada']: 
         explanations['language'] = f"🌐 Detected {meta['language_type']}"
     
     return explanations
 
 def analyze_fraud_type_rule(text):
+    """Enhanced fraud type analysis with better pattern matching"""
     text_lower = text.lower()
     fraud_scores = {}
+    
     for fraud_type, data in FRAUD_PATTERNS.items():
         score = sum(1 for keyword in data['keywords'] if keyword in text_lower)
         if score > 0:
@@ -220,44 +282,71 @@ def check_blocked_entities(text):
             blocked_found.append(('phone' if re.match(r'\b\d', entity) else 'url', entity))
     return blocked_found
 
-# --- UPDATED: 3-class prediction logic ---
+# --- Enhanced 3-class prediction logic ---
 def predict_three_class(sms_text):
-    """Predict using 3-class system: spam, ham, promo"""
+    """Enhanced prediction using 3-class system: spam, ham, promo"""
+    if main_3class_pipeline is None:
+        raise Exception("Main 3-class model not loaded")
+    
+    # Extract features
     df_features = extract_all_features(sms_text)
-    preprocessor = binary_pipeline.named_steps['preprocessor']
-    X_transformed = preprocessor.transform(df_features)
     
-    # Get binary prediction first
-    classifier = binary_pipeline.named_steps['classifier']
-    binary_pred_int = classifier.predict(X_transformed)[0]
-    binary_proba = classifier.predict_proba(X_transformed)[0]
+    # Get main 3-class prediction
+    prediction_int = main_3class_pipeline.predict(df_features)[0]
+    prediction_proba = main_3class_pipeline.predict_proba(df_features)[0]
     
-    # Convert to 3-class system
-    if binary_pred_int == 0:  # ham
-        return 'ham', float(binary_proba[0]) * 100, None, 'LOW'
+    # Map integer prediction to class name
+    class_mapping = {0: 'ham', 1: 'spam', 2: 'promo'}
+    result = class_mapping[prediction_int]
+    confidence = float(prediction_proba[prediction_int]) * 100
     
-    else:  # spam/promo - use subtype classifier to distinguish
-        subtype_classifier = subtype_pipeline.named_steps['classifier']
-        subtype = subtype_classifier.predict(X_transformed)[0]
-        
-        # Determine if it's promo or spam based on subtype
-        if subtype == 'promotional_offers':
-            return 'promo', float(binary_proba[1]) * 100, subtype, 'LOW'
-        else:
-            fraud_type_rule, threat_level = analyze_fraud_type_rule(sms_text)
-            return 'spam', float(binary_proba[1]) * 100, subtype, threat_level
+    # Update trust scores based on prediction
+    has_link = df_features['contains_link'].iloc[0]
+    df_features['sender_trust_score'], df_features['link_reputation_score'] = simulate_trust_scores(result, has_link)
+    
+    # Determine fraud type and threat level
+    fraud_type = None
+    threat_level = 'LOW'
+    
+    if result == 'spam':
+        fraud_type, threat_level = analyze_fraud_type_rule(sms_text)
+        # Try to use scam subtype classifier if available
+        if scam_subtype_pipeline is not None:
+            try:
+                fraud_type = scam_subtype_pipeline.predict(df_features)[0]
+            except:
+                pass  # Fall back to rule-based analysis
+    
+    elif result == 'promo':
+        fraud_type = 'promotional_offers'
+        threat_level = 'LOW'
+        # Try to use promo subtype classifier if available
+        if promo_subtype_pipeline is not None:
+            try:
+                fraud_type = promo_subtype_pipeline.predict(df_features)[0]
+            except:
+                pass  # Fall back to default
+    else:  # ham
+        fraud_type = 'personal'
+        threat_level = 'LOW'
+    
+    return result, confidence, fraud_type, threat_level, df_features
 
 # -----------------------------------------------------------
-# 🔹 API Endpoints (Updated for 3-class system)
+# 🔹 API Endpoints (Enhanced for 3-class system)
 # -----------------------------------------------------------
 
 @app.route('/', methods=['GET'])
 def home():
     return jsonify({
         'status': 'running', 
-        'message': '3-Class SMS Classifier (Spam/Ham/Promo)', 
-        'binary_model_loaded': binary_pipeline is not None,
-        'subtype_model_loaded': subtype_pipeline is not None
+        'message': 'Enhanced 3-Class SMS Classifier (Spam/Ham/Promo)', 
+        'model_classes': ['ham', 'spam', 'promo'],
+        'main_model_loaded': main_3class_pipeline is not None,
+        'scam_subtype_loaded': scam_subtype_pipeline is not None,
+        'promo_subtype_loaded': promo_subtype_pipeline is not None,
+        'version': '2.0',
+        'features': ['multilingual_support', 'enhanced_trust_scores', 'subtype_classification']
     })
 
 @app.route('/predict', methods=['POST'])
@@ -269,8 +358,8 @@ def predict():
         if not sms_text: 
             return jsonify({'error': 'No SMS text provided'}), 400
         
-        if binary_pipeline is None or subtype_pipeline is None: 
-            return jsonify({'error': 'Models not loaded'}), 500
+        if main_3class_pipeline is None: 
+            return jsonify({'error': 'Models not loaded. Please train the models first.'}), 500
         
         # Check for blocked entities
         blocked = check_blocked_entities(sms_text)
@@ -286,11 +375,10 @@ def predict():
             })
         
         # Get 3-class prediction
-        result, confidence, fraud_type, threat_level = predict_three_class(sms_text)
+        result, confidence, fraud_type, threat_level, df_features = predict_three_class(sms_text)
         
         # Extract features for explainability
-        df_features = extract_all_features(sms_text)
-        explanations = get_explainability_features(df_features, None)
+        explanations = get_explainability_features(df_features, result)
         
         # ASYNCHRONOUS LOGGING
         threading.Thread(
@@ -303,12 +391,13 @@ def predict():
             'sms_text': sms_text, 
             'prediction': result, 
             'confidence': round(confidence, 2),
-            'risk_score': round(confidence, 2),  # For frontend compatibility
+            'risk_score': round(confidence, 2) if result == 'spam' else 0,
             'timestamp': datetime.now().isoformat(),
-            'top_features': explanations.get('top_text_features', [])[:5]  # Top 5 features
+            'language': df_features['language_type'].iloc[0],
+            'top_features': explanations.get('top_text_features', [])[:5]
         }
         
-        # Add spam-specific fields
+        # Add category-specific fields
         if result == 'spam':
             response_data.update({
                 'fraud_type': fraud_type,
@@ -320,7 +409,13 @@ def predict():
         elif result == 'promo':
             response_data.update({
                 'fraud_type': fraud_type,
-                'threat_level': threat_level
+                'threat_level': threat_level,
+                'explainability': explanations
+            })
+        else:  # ham
+            response_data.update({
+                'fraud_type': fraud_type,
+                'explainability': explanations
             })
         
         return jsonify(response_data)
@@ -452,6 +547,11 @@ def get_stats():
         ham_count = cursor.execute("SELECT COUNT(*) FROM predictions WHERE prediction='ham'").fetchone()[0]
         promo_count = cursor.execute("SELECT COUNT(*) FROM predictions WHERE prediction='promo'").fetchone()[0]
         
+        # Calculate percentages
+        spam_percentage = round((spam_count / total * 100), 2) if total > 0 else 0
+        ham_percentage = round((ham_count / total * 100), 2) if total > 0 else 0
+        promo_percentage = round((promo_count / total * 100), 2) if total > 0 else 0
+        
         threat_distribution = dict(cursor.execute(
             "SELECT threat_level, COUNT(*) FROM predictions WHERE threat_level IS NOT NULL GROUP BY threat_level"
         ).fetchall())
@@ -470,9 +570,9 @@ def get_stats():
             'spam_count': spam_count,
             'ham_count': ham_count,
             'promo_count': promo_count,
-            'spam_percentage': round((spam_count / total * 100), 2) if total > 0 else 0,
-            'ham_percentage': round((ham_count / total * 100), 2) if total > 0 else 0,
-            'promo_percentage': round((promo_count / total * 100), 2) if total > 0 else 0,
+            'spam_percentage': spam_percentage,
+            'ham_percentage': ham_percentage,
+            'promo_percentage': promo_percentage,
             'threat_distribution': threat_distribution,
             'fraud_distribution': fraud_distribution,
             'community_reports': community_reports,
@@ -534,6 +634,39 @@ def get_blocked_entities():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/model-info', methods=['GET'])
+def get_model_info():
+    try:
+        with open('model_info.json', 'r') as f:
+            model_info = json.load(f)
+    except:
+        model_info = {'error': 'Model info not available'}
+    
+    return jsonify({
+        'model_info': model_info,
+        'loaded_models': {
+            'main_3class': main_3class_pipeline is not None,
+            'scam_subtype': scam_subtype_pipeline is not None,
+            'promo_subtype': promo_subtype_pipeline is not None
+        },
+        'features_supported': ['multilingual', 'trust_scores', 'link_analysis', 'ai_detection']
+    })
+
+@app.route('/model-metrics', methods=['GET'])
+def get_model_metrics():
+    """Endpoint to get model performance metrics"""
+    try:
+        with open('model_metrics.json', 'r') as f:
+            metrics = json.load(f)
+        return jsonify(metrics)
+    except FileNotFoundError:
+        return jsonify({'error': 'Model metrics not available. Please train the model first.'}), 404
+
 if __name__ == '__main__':
-    print("Starting 3-Class SMS Classifier on port 6008...")
-    app.run(debug=True, host='0.0.0.0', port=6006)
+    print("🚀 Starting Enhanced 3-Class SMS Classifier on port 6008...")
+    print("📊 Enhanced Model Status:")
+    print(f"   - Main 3-class model: {'✅ Loaded' if main_3class_pipeline else '❌ Not Found'}")
+    print(f"   - Scam subtype model: {'✅ Loaded' if scam_subtype_pipeline else '❌ Not Found'}")
+    print(f"   - Promo subtype model: {'✅ Loaded' if promo_subtype_pipeline else '❌ Not Found'}")
+    print("🌐 Features: Multilingual Support, Enhanced Trust Scores, Subtype Classification")
+    app.run(debug=True, host='0.0.0.0', port=6004)
