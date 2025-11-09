@@ -1,0 +1,25 @@
+{
+  "accuracy": 1.0,
+  "precision": 1.0,
+  "recall": 1.0,
+  "f1_score": 1.0,
+  "confusion_matrix": [
+    [
+      401,
+      0,
+      0
+    ],
+    [
+      0,
+      344,
+      0
+    ],
+    [
+      0,
+      0,
+      255
+    ]
+  ],
+  "test_samples": 1000,
+  "training_samples": 4000
+}

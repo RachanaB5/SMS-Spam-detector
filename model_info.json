@@ -1,0 +1,13 @@
+{
+  "timestamp": "20251109_143905",
+  "dataset": "enhanced_5000_dataset.csv",
+  "features_used": [
+    "message",
+    "contains_link",
+    "sender_trust_score",
+    "link_reputation_score",
+    "ai_generated_score",
+    "language_type"
+  ],
+  "model_type": "MultinomialNB (3-class) + LinearSVC (subtypes)"
+}
