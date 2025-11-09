@@ -7,7 +7,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import pickle
 import os
-from sklearn.metrics import accuracy_score, precision_score, recall_score, confusion_matrix
+from sklearn.metrics import accuracy_score, precision_score, recall_score, confusion_matrix, classification_report
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -17,36 +17,211 @@ from sklearn.naive_bayes import MultinomialNB
 import re
 
 # --- Configuration & Initialization ---
-API_URL = "http://localhost:6006"
+API_URL = "http://localhost:6004"
 
 st.set_page_config(
-    page_title="SMS Spam Detection",
+    page_title="Enhanced SMS Spam Detection",
     page_icon="📱",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
-# --- Custom Styling ---
+# --- Enhanced Custom Styling ---
 st.markdown("""
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@700;900&family=Roboto:wght@400;500&display=swap" rel="stylesheet">
     <style>
-    .stApp > header { display: none; }
-    .main-title { font-size: 3rem; font-weight: 800; text-align: center; color: #B22222; margin-bottom: 0.25rem; padding-top: 1rem; }
-    .sub-title { text-align: center; color: #666666; margin-bottom: 2rem; }
-    .spam-result { padding: 25px; border-radius: 12px; text-align: center; font-size: 1.8rem; font-weight: bold; margin: 25px 0; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-    .spam { background-color: #ffcccc; color: #8B0000; border: 3px solid #FF4500; }
-    .ham { background-color: #ccffcc; color: #006400; border: 3px solid #3CB371; }
-    div.stButton > button:first-child { border-radius: 8px; font-weight: bold; transition: all 0.2s; }
-    .stTabs [data-baseweb="tab-list"] { gap: 15px; }
-    .stTabs [data-baseweb="tab"] { font-size: 1.15rem; font-weight: 600; padding: 10px 20px; border-radius: 8px 8px 0 0; }
+    html, body, .stApp {
+        font-family: 'Roboto', 'Montserrat', Arial, sans-serif !important;
+        background: linear-gradient(120deg, #f8f9fa 0%, #e9ecef 100%);
+    }
+    /* Light mode styles */
+    body, .stApp {
+        color: #222 !important;
+    }
+    .main-title, .sub-title, .category-badge, .language-badge, .spam-result, .metric-card, .stMetric, .stDataFrame, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4, .stTextArea textarea {
+        color: #222 !important;
+    }
+    .spam-result { background-color: #ffeaea; }
+    .ham { background-color: #eaffea; }
+    .promo { background-color: #fffbe5; }
+    .stTabs [data-baseweb="tab"] { background: #fff; color: #B22222; }
+    .stTextArea textarea { background: #fffbe5; border: 2px solid #FFD700; }
+    .stMetric, .metric-card { background: #fffbe5; }
+    .stDataFrame { background: #fff; }
+    /* Dark mode styles */
+    @media (prefers-color-scheme: dark) {
+        html, body, .stApp {
+            background: linear-gradient(120deg, #23272f 0%, #181a20 100%) !important;
+        }
+        body, .stApp {
+            color: #fff !important;
+        }
+        .main-title, .sub-title, .category-badge, .language-badge, .spam-result, .metric-card, .stMetric, .stDataFrame, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4, .stTextArea textarea {
+            color: #fff !important;
+        }
+        .spam-result { background-color: #3a2323 !important; }
+        .ham { background-color: #233a23 !important; }
+        .promo { background-color: #3a3923 !important; }
+        .stTabs [data-baseweb="tab"] { background: #23272f !important; color: #FFD700 !important; }
+        .stTextArea textarea { background: #23272f !important; border: 2px solid #FFD700 !important; }
+        .stMetric, .metric-card { background: #23272f !important; }
+        .stDataFrame { background: #23272f !important; }
+        .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4 { color: #FFD700 !important; }
+    }
+    /* --- Existing styles --- */
+    .main-title {
+        font-family: 'Montserrat', sans-serif;
+        font-size: 3.2rem;
+        font-weight: 900;
+        text-align: center;
+        color: #B22222;
+        margin-bottom: 0.25rem;
+        padding-top: 1rem;
+        letter-spacing: 1px;
+        text-shadow: 1px 2px 8px #e0e0e0;
+    }
+    .sub-title {
+        font-family: 'Roboto', sans-serif;
+        text-align: center;
+        color: #444;
+        margin-bottom: 2rem;
+        font-size: 1.25rem;
+        font-weight: 500;
+        letter-spacing: 0.5px;
+    }
+    .spam-result {
+        padding: 28px;
+        border-radius: 16px;
+        text-align: center;
+        font-size: 2rem;
+        font-weight: bold;
+        margin: 30px 0;
+        box-shadow: 0 6px 18px rgba(0,0,0,0.08);
+        font-family: 'Montserrat', sans-serif;
+        transition: box-shadow 0.2s;
+    }
+    .spam-result:hover {
+        box-shadow: 0 10px 32px rgba(178,34,34,0.12);
+    }
+    .spam { background-color: #ffeaea; color: #8B0000; border: 3px solid #FF4500; }
+    .ham { background-color: #eaffea; color: #006400; border: 3px solid #3CB371; }
+    .promo { background-color: #fffbe5; color: #b8860b; border: 3px solid #FFD700; }
+    div.stButton > button:first-child {
+        border-radius: 10px;
+        font-weight: bold;
+        font-family: 'Montserrat', sans-serif;
+        background: linear-gradient(90deg,#B22222 0%,#FF8C00 100%);
+        color: #fff;
+        box-shadow: 0 2px 8px rgba(178,34,34,0.08);
+        transition: background 0.2s, box-shadow 0.2s;
+        border: none;
+        padding: 0.7em 2em;
+        font-size: 1.1rem;
+    }
+    div.stButton > button:first-child:hover {
+        background: linear-gradient(90deg,#FF8C00 0%,#B22222 100%);
+        box-shadow: 0 4px 16px rgba(178,34,34,0.18);
+    }
+    .stTabs [data-baseweb="tab-list"] { gap: 18px; }
+    .stTabs [data-baseweb="tab"] {
+        font-size: 1.18rem;
+        font-weight: 700;
+        padding: 12px 28px;
+        border-radius: 12px 12px 0 0;
+        font-family: 'Montserrat', sans-serif;
+        background: #fff;
+        color: #B22222;
+        transition: background 0.2s, color 0.2s;
+    }
+    .stTabs [data-baseweb="tab"]:hover {
+        background: #ffeaea;
+        color: #FF8C00;
+    }
+    .category-badge {
+        display: inline-block;
+        padding: 6px 18px;
+        border-radius: 18px;
+        font-weight: 700;
+        font-size: 1.05rem;
+        margin: 2px;
+        font-family: 'Montserrat', sans-serif;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.07);
+    }
+    .language-badge {
+        display: inline-block;
+        padding: 3px 12px;
+        border-radius: 14px;
+        font-size: 0.92rem;
+        background: #e0e0e0;
+        margin-left: 10px;
+        font-family: 'Roboto', sans-serif;
+        color: #333;
+    }
+    .metric-card {
+        background: #fff;
+        padding: 22px;
+        border-radius: 12px;
+        border-left: 5px solid #007bff;
+        margin: 12px 0;
+        box-shadow: 0 2px 8px rgba(0,123,255,0.07);
+        font-family: 'Montserrat', sans-serif;
+    }
+    .stMetric {
+        font-family: 'Montserrat', sans-serif !important;
+        font-size: 1.15rem !important;
+        color: #B22222 !important;
+        background: #fffbe5 !important;
+        border-radius: 10px !important;
+        padding: 10px 0 !important;
+        margin: 6px 0 !important;
+        box-shadow: 0 2px 8px rgba(255,215,0,0.07);
+    }
+    .stDataFrame {
+        font-family: 'Roboto', sans-serif !important;
+        font-size: 1.05rem !important;
+        background: #fff !important;
+        border-radius: 10px !important;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+    }
+    .stMarkdown h3, .stMarkdown h2, .stMarkdown h1 {
+        font-family: 'Montserrat', sans-serif !important;
+        color: #B22222 !important;
+        font-weight: 900 !important;
+        letter-spacing: 0.5px;
+    }
+    .stMarkdown h4 {
+        font-family: 'Montserrat', sans-serif !important;
+        color: #FF8C00 !important;
+        font-weight: 700 !important;
+    }
+    .stTextArea textarea {
+        font-family: 'Roboto', sans-serif !important;
+        font-size: 1.08rem !important;
+        background: #fffbe5 !important;
+        border-radius: 10px !important;
+        border: 2px solid #FFD700 !important;
+        padding: 12px !important;
+        color: #333 !important;
+    }
+    /* Custom scrollbar for tables */
+    ::-webkit-scrollbar {
+        width: 8px;
+        background: #e0e0e0;
+        border-radius: 8px;
+    }
+    ::-webkit-scrollbar-thumb {
+        background: #FFD700;
+        border-radius: 8px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
 # --- Header ---
-st.markdown('<div class="main-title">📱 SMS Spam Detective</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">An Enhanced AI/ML Project Demo | Backend: Flask, Model: Naive Bayes</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title"> Enhanced SMS Detective</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">Advanced 3-Class AI Classification | Spam • Ham • Promo | Multilingual Support</div>', unsafe_allow_html=True)
 
 # --- Tabs ---
-tab_home, tab_stats, tab_history, tab_visualizations = st.tabs(["🏠 Live Detector", "📊 Statistics & Model Insights", "📜 Prediction History", "📈 Advanced Visualizations"])
+tab_home, tab_stats, tab_history, tab_visualizations = st.tabs(["🏠 Live Detector", "📊 Statistics", "📜 History", "📈 Analytics"])
 
 # --- Helper Functions ---
 @st.cache_resource
@@ -81,90 +256,110 @@ def fetch_api(endpoint, params={}):
         st.error(f"❌ An unexpected error occurred: {str(e)}")
         return None
 
-def safe_load_dataset(file_path):
-    """Safely load and clean the dataset"""
+def calculate_model_metrics():
+    """Calculate model performance metrics from training data"""
     try:
-        # Try different encodings
-        encodings = ['utf-8', 'latin-1', 'iso-8859-1', 'cp1252']
-        df = None
+        # Load the enhanced_5000_dataset.csv
+        path = 'enhanced_5000_dataset.csv'
+        if not os.path.exists(path):
+            st.error("enhanced_5000_dataset.csv not found for model evaluation")
+            return None, None, None, None
+        df = pd.read_csv(path)
+        st.success(f"Loaded dataset: {path}")
         
-        for encoding in encodings:
-            try:
-                df = pd.read_csv(file_path, encoding=encoding)
-                st.success(f"Dataset loaded successfully with {encoding} encoding")
-                break
-            except UnicodeDecodeError:
-                continue
-        
-        if df is None:
-            st.error("Could not read the dataset with any encoding")
-            return None
-        
-        # Clean the dataset
-        st.write(f"Original dataset shape: {df.shape}")
-        
-        # Remove completely empty rows
-        df = df.dropna(how='all')
-        st.write(f"After removing empty rows: {df.shape}")
-        
-        return df
-        
-    except Exception as e:
-        st.error(f"Error loading dataset: {e}")
-        return None
-
-def prepare_dataset_for_training(df):
-    """Prepare dataset for model training and evaluation"""
-    try:
-        # Use only message and category columns
+        # Prepare data
         required_cols = ['message', 'category']
-        
         if not all(col in df.columns for col in required_cols):
             st.error(f"Required columns {required_cols} not found in dataset")
-            st.write("Available columns:", df.columns.tolist())
-            return None, None, None
+            return None, None, None, None
         
-        # Keep only the required columns
         df_clean = df[required_cols].copy()
         df_clean = df_clean.dropna()
-        
-        # Remove rows where message is empty
         df_clean = df_clean[df_clean['message'].astype(str).str.strip() != '']
         
-        # Standardize label format
-        df_clean['category'] = df_clean['category'].astype(str).str.lower().str.strip()
-        
-        # Map common label variations to spam/ham
-        spam_keywords = ['spam', '1', 'true', 'yes', 'fraud', 'scam']
-        ham_keywords = ['ham', '0', 'false', 'no', 'legit', 'normal', 'safe']
-        
+        # Standardize labels
         def map_label(label):
             label_str = str(label).lower().strip()
-            if any(keyword == label_str for keyword in spam_keywords):
+            if 'spam' in label_str or 'scam' in label_str:
                 return 'spam'
-            elif any(keyword == label_str for keyword in ham_keywords):
+            elif 'ham' in label_str or 'legit' in label_str:
                 return 'ham'
+            elif 'promo' in label_str or 'offer' in label_str:
+                return 'promo'
             else:
                 return label_str
         
         df_clean['label'] = df_clean['category'].apply(map_label)
-        
-        # Filter only spam and ham
-        df_final = df_clean[df_clean['label'].isin(['spam', 'ham'])].copy()
-        
-        st.write(f"Final dataset shape: {df_final.shape}")
-        st.write("Label distribution:")
-        st.write(df_final['label'].value_counts())
+        df_final = df_clean[df_clean['label'].isin(['spam', 'ham', 'promo'])].copy()
         
         if len(df_final) == 0:
-            st.error("No valid spam/ham messages found after cleaning")
-            return None, None, None
+            st.error("No valid spam/ham/promo messages found")
+            return None, None, None, None
+        
+        X = df_final['message']
+        y = df_final['label']
+        
+        # Convert labels to numeric
+        label_mapping = {'spam': 0, 'ham': 1, 'promo': 2}
+        y_numeric = y.map(label_mapping)
+        
+        # Check if we have the model and vectorizer
+        if model is None or vectorizer is None:
+            st.warning("Using fallback model for evaluation...")
+            # Create a simple model for evaluation
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y_numeric, test_size=0.2, random_state=42, stratify=y_numeric
+            )
             
-        return df_final, df_final['message'], df_final['label']
+            vectorizer_fallback = TfidfVectorizer(max_features=1000, stop_words='english')
+            X_train_tfidf = vectorizer_fallback.fit_transform(X_train)
+            X_test_tfidf = vectorizer_fallback.transform(X_test)
+            
+            model_fallback = MultinomialNB()
+            model_fallback.fit(X_train_tfidf, y_train)
+            
+            y_pred = model_fallback.predict(X_test_tfidf)
+            cm = confusion_matrix(y_test, y_pred)
+            
+        else:
+            # Use the loaded model
+            X_transformed = vectorizer.transform(X)
+            y_pred = model.predict(X_transformed)
+            cm = confusion_matrix(y_numeric, y_pred)
+        
+        # Calculate metrics
+        accuracy = accuracy_score(y_numeric, y_pred)
+        precision = precision_score(y_numeric, y_pred, average='weighted', zero_division=0)
+        recall = recall_score(y_numeric, y_pred, average='weighted', zero_division=0)
+        
+        return accuracy, precision, recall, cm
         
     except Exception as e:
-        st.error(f"Error preparing dataset: {e}")
-        return None, None, None
+        st.error(f"Error calculating model metrics: {e}")
+        return None, None, None, None
+
+# Fraud type labels with enhanced descriptions
+FRAUD_LABELS = {
+    # Spam types
+    'financial_scams': ('Financial Scam', '#B22222', 'Scams targeting bank accounts, loans, or financial information.'),
+    'prize_clickbait_scams': ('Prize/Lottery Scam', '#8B008B', 'Fake prize notifications or lottery winnings.'),
+    'phishing_urgency_scams': ('Phishing Scam', '#FF8C00', 'Urgent requests for verification or personal information.'),
+    'government_impersonation': ('Govt Impersonation', '#4682B4', 'Scammers pretending to be government officials.'),
+    'relationship_emotional_scams': ('Relationship Scam', '#C71585', 'Emotional manipulation for financial gain.'),
+    'employment_opportunity_scams': ('Job Scam', '#228B22', 'Fake job offers or work-from-home opportunities.'),
+    'tech_support': ('Tech Support Scam', '#2E8B57', 'Fake tech support or software update requests.'),
+    'general_spam': ('General Spam', '#666666', 'Uncategorized spam messages.'),
+    
+    # Promo types
+    'promotional_offers': ('Promotional Offer', '#FFD700', 'Legitimate marketing offers and discounts.'),
+    'service_update': ('Service Update', '#32CD32', 'Order tracking, delivery updates, or service notifications.'),
+    'flash_sale': ('Flash Sale', '#FF69B4', 'Limited time offers and flash sales.'),
+    'general_promo': ('General Promotion', '#FFA500', 'Marketing promotions and advertisements.'),
+    
+    # Ham types
+    'personal': ('Personal Message', '#006400', 'Personal communication between individuals.'),
+    'service_update': ('Service Update', '#32CD32', 'Legitimate service notifications and updates.')
+}
 
 # --- Tab: Live Detector ---
 with tab_home:
@@ -176,8 +371,9 @@ with tab_home:
     sms_text = st.text_area(
         "Type or paste your SMS message here:",
         height=150,
-        placeholder="Example: Congratulations! You've won a £1000 prize. Text WIN to 87121.",
-        key='sms_input_area'
+        placeholder="Example: Congratulations! You've won a ₹1000 prize. Text WIN to 87121.",
+        key='sms_input_area',
+        value=st.session_state.sms_input
     )
 
     col1, col2, col3 = st.columns([1,2,1])
@@ -188,7 +384,7 @@ with tab_home:
         if not sms_text.strip():
             st.error("⚠️ Please enter some text to analyze!")
         else:
-            with st.spinner("Analyzing SMS for Spam Score..."):
+            with st.spinner("🔍 Analyzing SMS with enhanced classification..."):
                 try:
                     response = requests.post(
                         f"{API_URL}/predict",
@@ -199,30 +395,19 @@ with tab_home:
                     prediction = result.get('prediction')
                     confidence = result.get('confidence', 0.0)
                     risk_score = result.get('risk_score', confidence)
-                    scam_type = result.get('fraud_type', 'Unknown')
+                    fraud_type = result.get('fraud_type', 'Unknown')
                     threat_level = result.get('threat_level', 'Unknown')
+                    language = result.get('language', 'Unknown')
 
-                    scam_labels = {
-                        'financial_scams': ('Financial Scam', '#B22222', 'Scams targeting your money or bank details.'),
-                        'identity_theft_scams': ('Identity Theft', '#8B008B', 'Scams aiming to steal personal information.'),
-                        'ecommerce_shopping_scams': ('E-commerce Scam', '#FF8C00', 'Fake shopping or delivery offers.'),
-                        'tech_support_service_scams': ('Tech Support Scam', '#4682B4', 'Impersonation of tech support or service providers.'),
-                        'relationship_emotional_scams': ('Relationship/Emotional Scam', '#C71585', 'Exploiting emotions or relationships for fraud.'),
-                        'employment_opportunity_scams': ('Employment/Opportunity Scam', '#228B22', 'Fake job, internship, or survey offers.'),
-                        'subscription_content_scams': ('Subscription/Content Scam', '#2E8B57', 'Traps with premium SMS or fake streaming links.'),
-                        'business_crypto_scams': ('Business/Crypto Scam', '#DAA520', 'Ponzi, crypto, or business proposal scams.'),
-                        'government_utility_scams': ('Government/Utility Scam', '#4169E1', 'Impersonation of government or utility agencies.'),
-                        'hybrid_ai_scams': ('Hybrid/AI-driven Scam', '#000000', 'Modern scams using AI, deepfakes, or social engineering.')
-                    }
+                    fraud_label, fraud_color, fraud_tip = FRAUD_LABELS.get(fraud_type, (fraud_type, '#666666', 'Unknown type'))
 
-                    scam_label, scam_color, scam_tip = scam_labels.get(scam_type, (scam_type, '#B22222', ''))
-
+                    # Display result based on prediction category
                     if prediction == 'spam':
                         st.markdown(
                             f'<div style="margin-bottom:10px;text-align:center;">'
-                            f'<span style="display:inline-block;padding:4px 12px;border-radius:16px;background:{scam_color};color:#fff;font-weight:600;font-size:1.05rem;">{scam_label}</span>'
-                            f'<span title="{scam_tip}" style="margin-left:8px;color:#666;font-size:0.95rem;">🛈</span>'
-                            f'<div style="margin-top:6px;color:#444;font-size:0.98rem;">{scam_tip}</div>'
+                            f'<span class="category-badge" style="background:{fraud_color};color:#fff;">{fraud_label}</span>'
+                            f'<span class="language-badge">{language}</span>'
+                            f'<div style="margin-top:6px;color:#444;font-size:0.98rem;">{fraud_tip}</div>'
                             f'</div>', unsafe_allow_html=True
                         )
                         st.markdown(
@@ -233,169 +418,201 @@ with tab_home:
                             f'</div>', unsafe_allow_html=True
                         )
                         st.error("⚠️ **Action Required:** This message exhibits high-risk characteristics. Do NOT click any links.")
-                    else:
+                    
+                    elif prediction == 'promo':
                         st.markdown(
-                            f'<div class="spam-result ham">✅ LEGITIMATE MESSAGE<br>Confidence: {risk_score:.2f}%</div>',
-                            unsafe_allow_html=True
+                            f'<div style="margin-bottom:10px;text-align:center;">'
+                            f'<span class="category-badge" style="background:{fraud_color};color:#fff;">{fraud_label}</span>'
+                            f'<span class="language-badge">{language}</span>'
+                            f'<div style="margin-top:6px;color:#444;font-size:0.98rem;">{fraud_tip}</div>'
+                            f'</div>', unsafe_allow_html=True
                         )
-                        st.success("✓ **Status:** This message appears safe.")
+                        st.markdown(
+                            f'<div class="spam-result promo">'
+                            f'🎁 <b>PROMOTIONAL MESSAGE</b><br>'
+                            f'<span style="color:#b8860b;font-weight:600;">Promo Type: {fraud_label}</span><br>'
+                            f'Confidence: {confidence:.2f}%'
+                            f'</div>', unsafe_allow_html=True
+                        )
+                        st.info("ℹ️ **Note:** This is a promotional message. Exercise caution before engaging with offers.")
+                    
+                    else:  # ham
+                        st.markdown(
+                            f'<div style="margin-bottom:10px;text-align:center;">'
+                            f'<span class="category-badge" style="background:{fraud_color};color:#fff;">{fraud_label}</span>'
+                            f'<span class="language-badge">{language}</span>'
+                            f'</div>', unsafe_allow_html=True
+                        )
+                        st.markdown(
+                            f'<div class="spam-result ham">'
+                            f'✅ <b>LEGITIMATE MESSAGE</b><br>'
+                            f'Confidence: {confidence:.2f}%'
+                            f'</div>', unsafe_allow_html=True
+                        )
+                        st.success("✓ **Status:** This message appears safe and legitimate.")
 
-                    # Confidence Meter
+                    # Enhanced Confidence Meter
                     st.markdown("### Confidence Breakdown")
                     col_gauge, col_explainer = st.columns([1,2])
                     with col_gauge:
+                        # Dynamic gauge color based on prediction
+                        if prediction == 'spam':
+                            gauge_color = "#8B0000"
+                            threshold = 75
+                        elif prediction == 'promo':
+                            gauge_color = "#FFD700"
+                            threshold = 60
+                        else:  # ham
+                            gauge_color = "#006400"
+                            threshold = 85
+
                         fig = go.Figure(go.Indicator(
                             mode="gauge+number",
-                            value=risk_score,
+                            value=confidence,
                             domain={'x':[0,1], 'y':[0,1]},
-                            title={'text': "Spam Risk Score"},
+                            title={'text': f"{prediction.upper()} Confidence"},
                             gauge={
                                 'axis': {'range':[0,100], 'tickwidth':1, 'tickcolor':"darkblue"},
-                                'bar': {'color': "#8B0000" if prediction=='spam' else "#006400"},
-                                'steps':[{'range':[0,40],'color':"lightgreen"},{'range':[40,70],'color':"yellow"},{'range':[70,100],'color':"salmon"}],
-                                'threshold': {'line':{'color':"red",'width':4}, 'thickness':0.75, 'value':75}
+                                'bar': {'color': gauge_color},
+                                'steps':[
+                                    {'range':[0,40],'color':"lightgreen"},
+                                    {'range':[40,70],'color':"yellow"},
+                                    {'range':[70,100],'color':"salmon"}
+                                ],
+                                'threshold': {
+                                    'line':{'color':"red",'width':4}, 
+                                    'thickness':0.75, 
+                                    'value':threshold
+                                }
                             }
                         ))
                         fig.update_layout(height=280, margin=dict(t=50,b=10,l=10,r=10))
                         st.plotly_chart(fig, use_container_width=True)
 
                     with col_explainer:
-                        st.markdown("#### Why this prediction?")
+                        st.markdown("#### 🧠 Why this prediction?")
                         top_features = result.get('top_features', [])
                         if top_features:
                             st.markdown(
                                 '<div style="background:#f9f9f9;border-radius:8px;padding:12px;margin-bottom:8px;">'
-                                '<b>Top tokens influencing spam detection:</b> '
+                                '<b>Key indicators detected:</b> '
                                 + ', '.join([f'<span style="color:#B22222;font-weight:600;">{t}</span>' for t in top_features]) +
                                 '</div>', unsafe_allow_html=True
                             )
+                        
+                        explainability = result.get('explainability', {})
+                        if explainability:
+                            st.markdown("#### 📊 Analysis Details")
+                            for key, value in explainability.items():
+                                st.write(f"**{key.replace('_', ' ').title()}:** {value}")
+                        
+                        # Category-specific tips
+                        if prediction == 'spam':
+                            st.error("**🚨 Safety Tip:** Never share personal or financial information via SMS. Beware of urgent requests and suspicious links.")
+                        elif prediction == 'promo':
+                            st.warning("**💡 Promo Tip:** Verify the sender and check official websites before responding to promotional offers.")
                         else:
-                            st.write("Model explainability not available.")
-                        st.info("**Safety Tip:** Never share personal or financial information via SMS. Beware of urgent requests and suspicious links.")
-                        st.markdown("[Report suspicious messages](https://reportfraud.ftc.gov/)")
+                            st.info("**👍 Good Practice:** Continue to be cautious with unsolicited messages.")
+                        
+                        st.markdown("[Report suspicious messages to authorities](https://reportfraud.ftc.gov/)")
 
                 except Exception as e:
                     st.error(f"Prediction API error: {e}")
 
-# --- Tab: Statistics & Model Insights ---
+# --- Tab: Statistics ---
 with tab_stats:
-    st.markdown("## 📊 Model & Usage Statistics")
+    
+    # System Statistics Section
+    st.markdown("---")
+    st.markdown("### 📈 System Statistics")
+    
     stats = fetch_api("stats")
-
+    
     if stats:
+        # Main metrics
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Total API Calls", stats.get('total_predictions', 0))
-        col2.metric("Spam Identified", stats.get('spam_count', 0))
-        col3.metric("Ham Identified", stats.get('ham_count', 0))
-        col4.metric("Spam Rate", f"{stats.get('spam_percentage',0):.2f}%")
+        col1.metric("Total Predictions", stats.get('total_predictions', 0))
+        col2.metric("Spam Detected", stats.get('spam_count', 0))
+        col3.metric("Ham Detected", stats.get('ham_count', 0))
+        col4.metric("Promo Detected", stats.get('promo_count', 0))
+        
+        # Percentages
+        col5, col6, col7 = st.columns(3)
+        col5.metric("Spam Rate", f"{stats.get('spam_percentage', 0):.1f}%")
+        col6.metric("Ham Rate", f"{stats.get('ham_percentage', 0):.1f}%")
+        col7.metric("Promo Rate", f"{stats.get('promo_percentage', 0):.1f}%")
+        
+        # Threat distribution
+        threat_dist = stats.get('threat_distribution', {})
+        if threat_dist:
+            st.markdown("### Threat Level Distribution")
+            threats_df = pd.DataFrame(list(threat_dist.items()), columns=['Threat Level', 'Count'])
+            fig_threats = px.pie(threats_df, values='Count', names='Threat Level', 
+                                title="Threat Level Distribution")
+            st.plotly_chart(fig_threats, use_container_width=True)
+        
+        # Fraud type distribution
+        fraud_dist = stats.get('fraud_distribution', {})
+        if fraud_dist:
+            st.markdown("### Fraud Type Distribution")
+            fraud_df = pd.DataFrame(list(fraud_dist.items()), columns=['Fraud Type', 'Count'])
+            fraud_df = fraud_df.sort_values('Count', ascending=False)
+            fig_fraud = px.bar(fraud_df, x='Fraud Type', y='Count', 
+                              title="Fraud Type Distribution",
+                              color='Count')
+            st.plotly_chart(fig_fraud, use_container_width=True)
+    else:
+        st.info("No system statistics available yet. Start classifying messages to see data!")
 
-        st.markdown("---")
-        st.markdown("### Model Performance Metrics (On Training Data)")
-
-        try:
-            # Load and prepare dataset
-            df_raw = safe_load_dataset('enhanced_scam_dataset.csv')
-            if df_raw is not None:
-                df_clean, X, y = prepare_dataset_for_training(df_raw)
-                
-                if df_clean is not None and model and vectorizer:
-                    # Convert labels to numeric
-                    y_numeric = y.map({'spam': 1, 'ham': 0})
-                    
-                    # Check for NaN values
-                    if y_numeric.isna().any():
-                        st.warning("NaN values found in labels after conversion. Removing them.")
-                        valid_indices = y_numeric.notna()
-                        X = X[valid_indices]
-                        y_numeric = y_numeric[valid_indices]
-                    
-                    # Transform messages using the loaded vectorizer
-                    X_transformed = vectorizer.transform(X)
-                    
-                    # Make predictions
-                    y_pred = model.predict(X_transformed)
-                    
-                    # Calculate metrics
-                    accuracy = accuracy_score(y_numeric, y_pred)
-                    precision = precision_score(y_numeric, y_pred, zero_division=0)
-                    recall = recall_score(y_numeric, y_pred, zero_division=0)
-
-                    metrics_col1, metrics_col2, metrics_col3 = st.columns(3)
-                    metrics_col1.metric("Accuracy", f"{accuracy:.2%}")
-                    metrics_col2.metric("Precision", f"{precision:.2%}")
-                    metrics_col3.metric("Recall", f"{recall:.2%}")
-
-                    # Confusion matrix
-                    st.markdown("#### Confusion Matrix")
-                    cm = confusion_matrix(y_numeric, y_pred)
-                    fig_cm = px.imshow(cm, labels=dict(x="Predicted Label", y="True Label", color="Count"),
-                                       x=['Ham (0)','Spam (1)'], y=['Ham (0)','Spam (1)'],
-                                       color_continuous_scale='Reds')
-                    for i in range(len(cm)):
-                        for j in range(len(cm[i])):
-                            fig_cm.add_annotation(x=j, y=i, text=str(cm[i][j]), showarrow=False,
-                                                  font=dict(color="black", size=16))
-                    st.plotly_chart(fig_cm, use_container_width=True)
-                    
-                else:
-                    st.warning("Could not prepare data for model evaluation")
-            else:
-                st.warning("Dataset not available for model evaluation")
-
-        except FileNotFoundError:
-            st.warning("⚠️ enhanced_scam_dataset.csv not found. Cannot calculate model metrics.")
-        except Exception as e:
-            st.error(f"Error calculating model metrics: {e}")
-
-# --- Tab: Prediction History ---
+# --- Tab: History ---
 with tab_history:
-    st.markdown("## 📜 Prediction History & Performance")
+    st.markdown("## 📜 Prediction History")
+    
+    # Add select box for number of history records
+    history_limit = st.selectbox(
+        "Show how many recent predictions?",
+        options=[10, 20, 50, 100, 200],
+        index=2,
+        help="Select the number of recent predictions to display"
+    )
     
     # Fetch history data
-    history_data = fetch_api("history", params={"limit": 1000})
+    history_data = fetch_api("history", params={"limit": history_limit})
     
     if history_data and history_data.get('history'):
         df_pred = pd.DataFrame(history_data['history'])
         
         if not df_pred.empty:
-            # Display metrics
-            st.markdown("### User Prediction Metrics")
-            
             # Calculate metrics
             total_predictions = len(df_pred)
-            
-            # Count spam predictions correctly
-            spam_count = 0
-            ham_count = 0
-            
-            if 'prediction' in df_pred.columns:
-                spam_count = len(df_pred[df_pred['prediction'].astype(str).str.lower().str.strip() == 'spam'])
-                ham_count = len(df_pred[df_pred['prediction'].astype(str).str.lower().str.strip() == 'ham'])
-            
-            spam_rate = (spam_count / total_predictions) * 100 if total_predictions > 0 else 0
+            spam_count = len(df_pred[df_pred['prediction'].astype(str).str.lower().str.strip() == 'spam'])
+            ham_count = len(df_pred[df_pred['prediction'].astype(str).str.lower().str.strip() == 'ham'])
+            promo_count = len(df_pred[df_pred['prediction'].astype(str).str.lower().str.strip() == 'promo'])
             
             col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Total Predictions", total_predictions)
-            col2.metric("Spam Detected", spam_count)
-            col3.metric("Ham Detected", ham_count)
-            col4.metric("Spam Rate", f"{spam_rate:.2f}%")
+            col1.metric("Total", total_predictions)
+            col2.metric("Spam", spam_count)
+            col3.metric("Ham", ham_count)
+            col4.metric("Promo", promo_count)
             
             # Recent predictions table
             st.markdown("### Recent Predictions")
             
-            # Create display dataframe with available columns
+            # Create display dataframe
             display_data = []
-            for idx, row in df_pred.head(20).iterrows():
+            for idx, row in df_pred.head(history_limit).iterrows():
                 display_row = {
-                    'sms_text': row.get('sms_text', 'N/A')[:100] + '...' if len(str(row.get('sms_text', ''))) > 100 else row.get('sms_text', 'N/A'),
-                    'prediction': row.get('prediction', 'N/A'),
-                    'confidence': f"{float(row.get('confidence', 0)):.2f}%" if row.get('confidence') else "N/A"
+                    'Message': row.get('sms_text', 'N/A')[:80] + '...' if len(str(row.get('sms_text', ''))) > 80 else row.get('sms_text', 'N/A'),
+                    'Type': row.get('prediction', 'N/A'),
+                    'Fraud Type': row.get('fraud_type', 'N/A'),
+                    'Confidence': f"{float(row.get('confidence', 0)):.1f}%" if row.get('confidence') else "N/A",
+                    'Threat Level': row.get('threat_level', 'N/A')
                 }
                 if 'timestamp' in row:
                     try:
-                        display_row['timestamp'] = pd.to_datetime(row['timestamp']).strftime('%Y-%m-%d %H:%M:%S')
+                        display_row['Time'] = pd.to_datetime(row['timestamp']).strftime('%H:%M')
                     except:
-                        display_row['timestamp'] = str(row['timestamp'])
+                        display_row['Time'] = str(row['timestamp'])[11:16]
                 display_data.append(display_row)
             
             display_df = pd.DataFrame(display_data)
@@ -404,230 +621,74 @@ with tab_history:
             def style_prediction(val):
                 if str(val).lower().strip() == 'spam':
                     return 'color: red; font-weight: bold;'
-                else:
+                elif str(val).lower().strip() == 'promo':
+                    return 'color: orange; font-weight: bold;'
+                else:  # ham
                     return 'color: green; font-weight: bold;'
             
-            if 'prediction' in display_df.columns:
-                st.dataframe(
-                    display_df.style.applymap(style_prediction, subset=['prediction']),
-                    use_container_width=True,
-                    height=400
-                )
+            if 'Type' in display_df.columns:
+                styled_df = display_df.style.applymap(style_prediction, subset=['Type'])
+                st.dataframe(styled_df, use_container_width=True, height=400)
             else:
                 st.dataframe(display_df, use_container_width=True, height=400)
             
         else:
             st.info("No prediction history data available yet.")
     else:
-        st.warning("No prediction history found. Predictions will appear here as users interact with the app.")
+        st.info("No prediction history found. Classify some messages to see them here!")
 
-# --- Tab: Advanced Visualizations ---
+# --- Tab: Analytics ---
 with tab_visualizations:
-    st.markdown("## 📈 Advanced Model Visualizations")
+    st.markdown("## 📈 Classification Analytics")
     
-    try:
-        # Load dataset for visualizations
-        df_raw = safe_load_dataset("enhanced_scam_dataset.csv")
+    # Fetch data for analytics
+    stats = fetch_api("stats")
+    history_data = fetch_api("history", params={"limit": 100})
+    
+    if stats and history_data and history_data.get('history'):
+        df_pred = pd.DataFrame(history_data['history'])
         
-        if df_raw is not None:
-            df_clean, X, y = prepare_dataset_for_training(df_raw)
+        if not df_pred.empty:
+            # Category distribution over time
+            st.markdown("### Category Distribution Over Time")
             
-            if df_clean is not None:
-                st.markdown("### Dataset Overview")
-                col1, col2, col3 = st.columns(3)
-                col1.metric("Total Messages", len(df_clean))
-                spam_count = len(df_clean[df_clean['label'] == 'spam'])
-                ham_count = len(df_clean[df_clean['label'] == 'ham'])
-                col2.metric("Spam Count", spam_count)
-                col3.metric("Ham Count", ham_count)
-                
-                # Visualization options
-                viz_option = st.selectbox(
-                    "Choose Visualization:",
-                    [
-                        "Confusion Matrix Heatmap",
-                        "Message Length Distribution",
-                        "Spam vs Ham Distribution",
-                        "Word Frequency Analysis",
-                        "Model Performance Comparison"
-                    ]
-                )
-                
-                if viz_option == "Confusion Matrix Heatmap":
-                    st.markdown("### Confusion Matrix Heatmap")
-                    
-                    # Prepare data for model training
-                    X_train, X_test, y_train, y_test = train_test_split(
-                        X, y, test_size=0.2, random_state=42, stratify=y
-                    )
-                    
-                    # Vectorize text
-                    vectorizer_viz = TfidfVectorizer(max_features=1000, stop_words="english")
-                    X_train_tfidf = vectorizer_viz.fit_transform(X_train)
-                    X_test_tfidf = vectorizer_viz.transform(X_test)
-                    
-                    # Train model
-                    model_viz = LogisticRegression(max_iter=1000)
-                    model_viz.fit(X_train_tfidf, y_train.map({'spam': 1, 'ham': 0}))
-                    
-                    # Predictions
-                    y_pred = model_viz.predict(X_test_tfidf)
-                    y_test_numeric = y_test.map({'spam': 1, 'ham': 0})
-                    
-                    # Create confusion matrix
-                    cm = confusion_matrix(y_test_numeric, y_pred)
-                    plt.figure(figsize=(8, 6))
-                    sns.heatmap(cm, annot=True, fmt="d", cmap="YlGnBu",
-                               xticklabels=['Ham', 'Spam'], yticklabels=['Ham', 'Spam'])
-                    plt.title("Confusion Matrix")
-                    plt.xlabel("Predicted")
-                    plt.ylabel("Actual")
-                    st.pyplot(plt)
-                    
-                    # Show metrics
-                    accuracy = accuracy_score(y_test_numeric, y_pred)
-                    precision = precision_score(y_test_numeric, y_pred, zero_division=0)
-                    recall = recall_score(y_test_numeric, y_pred, zero_division=0)
-                    
-                    st.markdown(f"""
-                    **Model Performance Metrics:**
-                    - **Accuracy:** {accuracy:.3f}
-                    - **Precision:** {precision:.3f}  
-                    - **Recall:** {recall:.3f}
-                    """)
-                    
-                elif viz_option == "Message Length Distribution":
-                    st.markdown("### Message Length Distribution")
-                    
-                    df_clean['message_length'] = df_clean['message'].str.len()
-                    
-                    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
-                    
-                    # Histogram
-                    sns.histplot(data=df_clean, x='message_length', hue='label', bins=50, ax=ax1)
-                    ax1.set_title('Message Length Distribution by Category')
-                    ax1.set_xlabel('Message Length')
-                    ax1.set_ylabel('Frequency')
-                    
-                    # Box plot
-                    sns.boxplot(data=df_clean, x='label', y='message_length', ax=ax2)
-                    ax2.set_title('Message Length by Category')
-                    ax2.set_xlabel('Category')
-                    ax2.set_ylabel('Message Length')
-                    
-                    plt.tight_layout()
-                    st.pyplot(plt)
-                    
-                elif viz_option == "Spam vs Ham Distribution":
-                    st.markdown("### Spam vs Ham Distribution")
-                    
-                    category_counts = df_clean['label'].value_counts()
-                    
-                    fig = px.pie(values=category_counts.values, 
-                                names=category_counts.index,
-                                title="Spam vs Ham Distribution",
-                                color=category_counts.index,
-                                color_discrete_map={'spam': 'red', 'ham': 'green'})
-                    st.plotly_chart(fig, use_container_width=True)
-                    
-                elif viz_option == "Word Frequency Analysis":
-                    st.markdown("### Word Frequency Analysis")
-                    
-                    from collections import Counter
-                    
-                    # Extract words from spam messages
-                    spam_words = ' '.join(df_clean[df_clean['label'] == 'spam']['message']).lower()
-                    spam_words = re.findall(r'\b[a-z]+\b', spam_words)
-                    spam_word_freq = Counter(spam_words)
-                    
-                    # Extract words from ham messages
-                    ham_words = ' '.join(df_clean[df_clean['label'] == 'ham']['message']).lower()
-                    ham_words = re.findall(r'\b[a-z]+\b', ham_words)
-                    ham_word_freq = Counter(ham_words)
-                    
-                    # Get top words (exclude common short words)
-                    common_words = {'the', 'and', 'to', 'a', 'i', 'you', 'is', 'in', 'it', 'for', 'of', 'on', 'that', 'with', 'my', 'your', 'me', 'are', 'so', 'but', 'be', 'at', 'if', 'or', 'as', 'will', 'have', 'has', 'had', 'this', 'not'}
-                    spam_word_freq_filtered = {word: count for word, count in spam_word_freq.items() if word not in common_words and len(word) > 2}
-                    ham_word_freq_filtered = {word: count for word, count in ham_word_freq.items() if word not in common_words and len(word) > 2}
-                    
-                    top_spam_words = dict(Counter(spam_word_freq_filtered).most_common(15))
-                    top_ham_words = dict(Counter(ham_word_freq_filtered).most_common(15))
-                    
-                    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
-                    
-                    # Spam words
-                    if top_spam_words:
-                        ax1.barh(list(top_spam_words.keys()), list(top_spam_words.values()), color='red')
-                        ax1.set_title('Top 15 Words in Spam Messages')
-                        ax1.set_xlabel('Frequency')
-                    else:
-                        ax1.text(0.5, 0.5, 'No spam words found', ha='center', va='center')
-                    
-                    # Ham words
-                    if top_ham_words:
-                        ax2.barh(list(top_ham_words.keys()), list(top_ham_words.values()), color='green')
-                        ax2.set_title('Top 15 Words in Ham Messages')
-                        ax2.set_xlabel('Frequency')
-                    else:
-                        ax2.text(0.5, 0.5, 'No ham words found', ha='center', va='center')
-                    
-                    plt.tight_layout()
-                    st.pyplot(plt)
-                    
-                elif viz_option == "Model Performance Comparison":
-                    st.markdown("### Model Performance Comparison")
-                    
-                    X_train, X_test, y_train, y_test = train_test_split(
-                        X, y, test_size=0.2, random_state=42, stratify=y
-                    )
-                    
-                    vectorizer_comp = TfidfVectorizer(max_features=1000, stop_words="english")
-                    X_train_tfidf = vectorizer_comp.fit_transform(X_train)
-                    X_test_tfidf = vectorizer_comp.transform(X_test)
-                    
-                    y_train_numeric = y_train.map({'spam': 1, 'ham': 0})
-                    y_test_numeric = y_test.map({'spam': 1, 'ham': 0})
-                    
-                    performance_data = []
-                    
-                    # Logistic Regression
-                    lr_model = LogisticRegression(max_iter=1000)
-                    lr_model.fit(X_train_tfidf, y_train_numeric)
-                    y_pred_lr = lr_model.predict(X_test_tfidf)
-                    
-                    performance_data.append({
-                        'Model': 'Logistic Regression',
-                        'Accuracy': accuracy_score(y_test_numeric, y_pred_lr),
-                        'Precision': precision_score(y_test_numeric, y_pred_lr, zero_division=0),
-                        'Recall': recall_score(y_test_numeric, y_pred_lr, zero_division=0)
-                    })
-                    
-                    # Naive Bayes
-                    nb_model = MultinomialNB()
-                    nb_model.fit(X_train_tfidf, y_train_numeric)
-                    y_pred_nb = nb_model.predict(X_test_tfidf)
-                    
-                    performance_data.append({
-                        'Model': 'Naive Bayes',
-                        'Accuracy': accuracy_score(y_test_numeric, y_pred_nb),
-                        'Precision': precision_score(y_test_numeric, y_pred_nb, zero_division=0),
-                        'Recall': recall_score(y_test_numeric, y_pred_nb, zero_division=0)
-                    })
-                    
-                    # Create comparison chart
-                    perf_df = pd.DataFrame(performance_data)
-                    perf_melted = perf_df.melt(id_vars=['Model'], 
-                                              value_vars=['Accuracy', 'Precision', 'Recall'],
-                                              var_name='Metric', value_name='Score')
-                    
-                    fig = px.bar(perf_melted, x='Model', y='Score', color='Metric',
-                                barmode='group', title='Model Performance Comparison',
-                                color_discrete_sequence=px.colors.qualitative.Set2)
-                    st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.error("Could not prepare dataset for visualizations")
+            # Convert timestamp and prepare data
+            df_pred['timestamp'] = pd.to_datetime(df_pred['timestamp'])
+            df_pred['date'] = df_pred['timestamp'].dt.date
+            df_pred['hour'] = df_pred['timestamp'].dt.hour
+            
+            # Daily counts
+            daily_counts = df_pred.groupby(['date', 'prediction']).size().reset_index(name='count')
+            fig_daily = px.line(daily_counts, x='date', y='count', color='prediction',
+                               title="Daily Prediction Trends",
+                               color_discrete_map={'spam': 'red', 'ham': 'green', 'promo': 'gold'})
+            st.plotly_chart(fig_daily, use_container_width=True)
+            
+            # Hourly pattern
+            st.markdown("### Hourly Activity Pattern")
+            hourly_counts = df_pred.groupby(['hour', 'prediction']).size().reset_index(name='count')
+            fig_hourly = px.line(hourly_counts, x='hour', y='count', color='prediction',
+                                title="Hourly Prediction Pattern",
+                                color_discrete_map={'spam': 'red', 'ham': 'green', 'promo': 'gold'})
+            st.plotly_chart(fig_hourly, use_container_width=True)
+            
+            # Removed Confidence Score Distribution section
+            
         else:
-            st.error("Dataset not available for visualizations")
-            
-    except Exception as e:
-        st.error(f"Error generating visualizations: {e}")
+            st.info("Not enough data for analytics yet. Keep using the classifier!")
+    else:
+        st.info("Analytics data will appear here as you classify more messages!")
+
+# Add system status in sidebar
+st.sidebar.markdown("### 🔧 System Status")
+api_status = "✅ Connected" if fetch_api("") is not None else "❌ Disconnected"
+st.sidebar.metric("API Status", api_status)
+
+# Add multilingual support information
+st.sidebar.markdown("### 🌐 Supported Languages")
+st.sidebar.info("""
+- ✅ English
+- ✅ Hinglish (Hindi+English)
+- ✅ Hindi  
+- ✅ Kannada
+""")
