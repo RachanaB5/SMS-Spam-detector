@@ -16,10 +16,9 @@ seaborn>=0.12.2
 # Other dependencies
 python-dotenv>=1.0.0
 
-# If you use Flask/gunicorn elsewhere, add them below
-# flask>=2.3.3
-# flask-cors>=4.0.0
+flask>=2.3.3
+flask-cors>=4.0.0
 gunicorn>=21.2.0
 
 # Testing (optional)
-# pytest>=7.4.2
+pytest>=7.4.2
