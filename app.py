@@ -668,5 +668,11 @@ if __name__ == '__main__':
     print(f"   - Main 3-class model: {'✅ Loaded' if main_3class_pipeline else '❌ Not Found'}")
     print(f"   - Scam subtype model: {'✅ Loaded' if scam_subtype_pipeline else '❌ Not Found'}")
     print(f"   - Promo subtype model: {'✅ Loaded' if promo_subtype_pipeline else '❌ Not Found'}")
+
+# Global error handler to ensure all errors return JSON
+@app.errorhandler(Exception)
+def handle_exception(e):
+    return jsonify({'error': str(e)}), 500
+
     print("🌐 Features: Multilingual Support, Enhanced Trust Scores, Subtype Classification")
     app.run(debug=True, host='0.0.0.0', port=6004)
