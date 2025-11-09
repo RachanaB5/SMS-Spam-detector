@@ -17,7 +17,7 @@ from sklearn.naive_bayes import MultinomialNB
 import re
 
 # --- Configuration & Initialization ---
-API_URL = "http://localhost:6004"
+API_URL = "https://sms-spam-detector-ha77.onrender.com"
 
 st.set_page_config(
     page_title="Enhanced SMS Spam Detection",
